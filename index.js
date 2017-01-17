@@ -10,6 +10,7 @@ const contrib = require("blessed-contrib");
 const format = require("date-format");
 const pretty = require("pretty-ms");
 const airports = require("airports");
+const config = require('./config.js');
 
 // Time constants
 const TIME_MS = 1;
@@ -25,15 +26,15 @@ const fares = {
   return: []
 };
 
-// Command line options
-var originAirport;
-var destinationAirport;
-var outboundDateString;
-var returnDateString;
-var adultPassengerCount;
-var individualDealPrice;
-var totalDealPrice;
-var interval = 30; // In minutes
+// pull data from local config file
+var originAirport = config.from;
+var destinationAirport = config.to;
+var outboundDateString = config['leave-date'];
+var returnDateString = config['return-data'];
+var adultPassengerCount = config.passengers;
+var individualDealPrice = config['individual-deal-price'] || null; 
+var totalDealPrice = config['total-deal-price'] || null; 
+var interval = config.interval || 30; // In minutes
 
 // Parse command line options (no validation, sorry!)
 process.argv.forEach((arg, i, argv) => {
@@ -65,11 +66,17 @@ process.argv.forEach((arg, i, argv) => {
   }
 });
 
-// Check if Twilio env vars are set
-const isTwilioConfigured = process.env.TWILIO_ACCOUNT_SID &&
-                           process.env.TWILIO_AUTH_TOKEN &&
-                           process.env.TWILIO_PHONE_FROM &&
-                           process.env.TWILIO_PHONE_TO;
+// env variable supercede config vars
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || config.TWILIO.ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || config.TWILIO.AUTH_TOKEN;
+const TWILIO_PHONE_FROM = process.env.TWILIO_PHONE_FROM || config.TWILIO.PHONE_FROM;
+const TWILIO_PHONE_TO = process.env.TWILIO_PHONE_TO || config.TWILIO.PHONE_TO;
+
+// Check if Twilio vars are set
+const isTwilioConfigured = TWILIO_ACCOUNT_SID &&
+                           TWILIO_AUTH_TOKEN &&
+                           TWILIO_PHONE_FROM &&
+                           TWILIO_PHONE_TO;
 
 /**
  * Dashboard renderer
@@ -313,26 +320,33 @@ const dashboard = new Dashboard();
  */
 const sendTextMessage = (message) => {
   try {
-    const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
     twilioClient.sendMessage({
-      from: process.env.TWILIO_PHONE_FROM,
-      to: process.env.TWILIO_PHONE_TO,
+      from: TWILIO_PHONE_FROM,
+      to: TWILIO_PHONE_TO,
       body: message
     }, function(err, data) {
       if (!dashboard) { return; }
       if (err) {
         dashboard.log([
-          chalk.red(`Error: failed to send SMS to ${process.env.TWILIO_PHONE_TO} from ${process.env.TWILIO_PHONE_FROM}`)
+          chalk.red(`Error: failed to send SMS to ${TWILIO_PHONE_TO} from ${TWILIO_PHONE_FROM}`)
         ]);
       } else {
         dashboard.log([
-          chalk.green(`Successfully sent SMS to ${process.env.TWILIO_PHONE_TO} from ${process.env.TWILIO_PHONE_FROM}`)
+          chalk.green(`Successfully sent SMS to ${TWILIO_PHONE_TO} from ${TWILIO_PHONE_FROM}`)
         ]);
       }
     });
   } catch(e) {}
 };
+
+var roundTrip = "RoundTrip";
+var twoWayTrip = true;
+if (typeof config.roundtrip !== void(0) && config.roundtrip === false) {
+  roundTrip = "";
+  twoWayTrip = false;
+}
 
 /**
  * fetchPrices latest Southwest prices
@@ -343,9 +357,9 @@ const fetchPrices = () => {
   osmosis
     .get("https://www.southwest.com")
     .submit(".booking-form--form", {
-      twoWayTrip: true,
+      twoWayTrip: twoWayTrip,
       airTranRedirect: "",
-      returnAirport: "RoundTrip",
+      returnAirport: roundTrip,
       outboundTimeOfDay: "ANYTIME",
       returnTimeOfDay: "ANYTIME",
       seniorPassengerCount: 0,
@@ -473,7 +487,7 @@ dashboard.settings([
   `Interval: ${pretty(interval * TIME_MIN)}`,
   `Individual deal price: ${individualDealPrice ? `<= \$${individualDealPrice}` : "disabled"}`,
   `Total deal price: ${totalDealPrice ? `<= \$${totalDealPrice}` : "disabled"}`,
-  `SMS alerts: ${isTwilioConfigured ? process.env.TWILIO_PHONE_TO : "disabled"}`
+  `SMS alerts: ${isTwilioConfigured ? TWILIO_PHONE_TO : "disabled"}`
 ]);
 
 fetchPrices();
